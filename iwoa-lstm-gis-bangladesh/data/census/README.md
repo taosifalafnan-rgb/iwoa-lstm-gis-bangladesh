@@ -1,5 +1,0 @@
-# data/census/
-
-Drop your census data files here.
-See docs/data_schema.md for expected column names and file naming conventions.
-See CLAUDE.md → "Data Drop Instructions" for full details.
