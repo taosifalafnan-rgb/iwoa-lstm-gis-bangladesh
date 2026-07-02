@@ -46,8 +46,17 @@ All thresholds live in `configs/config.yaml → hhi`; the weights come from AHP.
 > has its own panel builder (`src/analysis/hhi_panel.py`).
 
 The panel carries a **spatial dimension** (`ward_id`, `district`, `upazila`,
-`lon`, `lat`) so HHI is reported per ward per year — required for the choropleth
-maps and hotspot narrative.
+`lon`, `lat`) so HHI is reported per ward — required for the choropleth maps
+and hotspot narrative.
+
+**Temporal resolution: quarterly.** Data is collected at **4 sampling points
+per year** — January, April, July, October (`month` / `period` columns) — over
+2000–2024. That is 10 wards × 25 years × 4 quarters = **1 000 historical rows**.
+Ward-level visuals (maps, ranking, zone composition) average the four quarters
+into one value per ward per year via `hhi.annual_ward_hhi`; the time-series plot
+uses the annual mean. A blank data-entry template with every ID row pre-filled
+lives at `templates/hhi_panel_template.csv` — regenerate it with
+`python -c "from src.analysis.hhi_panel import write_template; write_template()"`.
 
 ---
 
@@ -117,7 +126,7 @@ Illustrative study-area mean HHI from the synthetic demo panel:
 
 | | 2024 | 2040 BAU | 2040 S1 | 2040 S2 |
 |--|-----:|---------:|--------:|--------:|
-| Mean HHI | ~59 (Moderate) | ~66 (At-Risk) | ~35 (Moderate) | ~20 (Acceptable) |
+| Mean HHI | ~54 (At-Risk) | ~58 (At-Risk) | ~33 (Moderate) | ~21 (Acceptable) |
 
 ---
 

@@ -338,8 +338,9 @@ class HHIComputer:
         log.info(f"Computing HHI for {len(df)} records...")
 
         # Preserve identifier columns (and any spatial metadata) when present.
-        id_cols = [c for c in [time_col, "year", ward_col, "district", "upazila",
-                               "lat", "lon", "scenario"] if c in df.columns]
+        id_cols = [c for c in [time_col, "year", "month", "period", ward_col,
+                               "district", "upazila", "lat", "lon", "scenario"]
+                   if c in df.columns]
         result = df[id_cols].copy() if id_cols else pd.DataFrame(index=df.index)
 
         # Compute raw sub-indices
@@ -390,6 +391,48 @@ class HHIComputer:
         hhi_df.to_csv(path, index=False)
         log.info(f"HHI saved: {path}")
         return path
+
+
+# ── MODULE-LEVEL HELPERS (used by visualization) ────────────────────────────
+
+ZONE_BINS = [0, 25, 50, 75, 100]
+ZONE_LABELS = ["Acceptable", "Moderate", "At-Risk", "Critical"]
+
+
+def classify_zone(hhi: pd.Series) -> pd.Series:
+    """
+    Classify HHI scores [0-100] into the four vulnerability zones.
+
+    Args:
+        hhi: HHI score Series.
+
+    Returns:
+        Categorical Series of zone labels.
+    """
+    return pd.cut(hhi, bins=ZONE_BINS, labels=ZONE_LABELS, include_lowest=True)
+
+
+def annual_ward_hhi(hhi_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Collapse a possibly sub-annual (quarterly) HHI frame to one row per
+    ward-year by averaging HHI and sub-indices, then re-classify the zone.
+
+    Ward-level visuals (maps, ranking, zone composition) need a single value
+    per ward per year; the four quarterly observations are averaged here.
+
+    Args:
+        hhi_df: HHI results, possibly with multiple rows per ward-year.
+
+    Returns:
+        Annual ward-level HHI DataFrame with a recomputed vulnerability_zone.
+    """
+    keys = [c for c in ["year", "ward_id", "district", "upazila", "lon", "lat",
+                        "scenario"] if c in hhi_df.columns]
+    val_cols = [c for c in ["HHI", "C1_air", "C2_water", "C3_thermal",
+                            "C4_green", "C5_socio"] if c in hhi_df.columns]
+    out = hhi_df.groupby(keys, as_index=False)[val_cols].mean()
+    out["vulnerability_zone"] = classify_zone(out["HHI"])
+    return out
 
 
 if __name__ == "__main__":
