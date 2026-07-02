@@ -27,6 +27,25 @@ python run_pipeline.py --skip-iwoa
 
 ---
 
+## HHI Assessment (standalone, runs without the LSTM/IWOA stages)
+
+The Human Habitability Index can be assessed and created top-to-bottom on its
+own. If no real data is present, a reproducible **synthetic demo panel** is
+generated so the flow runs immediately.
+
+```bash
+python run_hhi_assessment.py                 # full flow → outputs/results, figures, maps
+python run_hhi_assessment.py --force-synthetic
+python run_hhi_assessment.py --no-viz
+python run_hhi_assessment.py --scenarios BAU S2
+```
+
+Flow: **AHP weights → raw ward panel → BAU/S1/S2 projection to 2040 →
+sub-indices C1–C5 → weighted HHI → vulnerability zones → figures + maps.**
+Full technical description in [`docs/hhi_flow.md`](docs/hhi_flow.md).
+
+---
+
 ## Data Setup
 
 Drop your data files in the correct folders before running:
@@ -76,8 +95,8 @@ It contains all architectural decisions, parameter conventions, and pipeline rul
 - [ ] Step 5: LSTM trained
 - [ ] Step 6: Evaluation done
 - [ ] Step 7: Forecasts generated
-- [ ] Step 8: HHI computed
-- [ ] Step 9: Figures ready
+- [x] Step 8: HHI computed — end-to-end flow in `run_hhi_assessment.py` (AHP + panel + scenarios + HHI)
+- [x] Step 9: Figures ready — HHI figures/maps in `src/visualization/hhi_plots.py`, `hhi_maps.py`
 
 ---
 

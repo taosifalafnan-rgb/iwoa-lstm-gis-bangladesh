@@ -109,12 +109,15 @@ class AHP:
             ci: Consistency Index.
             cr: Consistency Ratio. Must be < 0.10.
         """
-        ri_values = vars(cfg.ahp.ri_values) if hasattr(cfg.ahp.ri_values, '__dict__') \
+        # ri_values is loaded from config as a plain dict with integer keys
+        # (see config loader). Fall back to the standard Saaty table if absent.
+        ri_values = cfg.ahp.ri_values if isinstance(cfg.ahp.ri_values, dict) \
                     else {1: 0.0, 2: 0.0, 3: 0.58, 4: 0.90, 5: 1.12,
                           6: 1.24, 7: 1.32, 8: 1.41, 9: 1.45, 10: 1.49}
 
         ci = (lam_max - self.n) / (self.n - 1)
-        ri = ri_values.get(str(self.n), ri_values.get(self.n, 1.12))
+        # Accept either int or str keys for robustness.
+        ri = ri_values.get(self.n, ri_values.get(str(self.n), 1.12))
         cr = ci / ri if ri > 0 else 0.0
 
         return ci, cr
@@ -165,12 +168,13 @@ class AHP:
 
     def _save(self, weights: dict, lam_max: float, ci: float, cr: float):
         Path("outputs/results").mkdir(parents=True, exist_ok=True)
+        # Cast to native Python types — numpy scalars are not JSON serializable.
         result = {
-            "weights":  weights,
-            "lambda_max": lam_max,
-            "CI":       ci,
-            "CR":       cr,
-            "consistent": cr < cfg.ahp.max_cr
+            "weights":  {k: float(v) for k, v in weights.items()},
+            "lambda_max": float(lam_max),
+            "CI":       float(ci),
+            "CR":       float(cr),
+            "consistent": bool(cr < cfg.ahp.max_cr)
         }
         with open("outputs/results/ahp_weights.json", "w") as f:
             json.dump(result, f, indent=2)
