@@ -9,8 +9,27 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
-def _dict_to_namespace(d: dict) -> SimpleNamespace:
-    """Recursively convert nested dict to SimpleNamespace for dot-access."""
+def _dict_to_namespace(d: dict):
+    """
+    Recursively convert nested dict to SimpleNamespace for dot-access.
+
+    Dicts whose keys are not all strings (e.g. the integer-keyed
+    ``ahp.ri_values`` and ``spatial.lulc_classes`` mappings in config.yaml)
+    cannot be represented as attributes, so they are preserved as plain
+    dicts. Nested dict values inside them are still converted recursively.
+
+    Args:
+        d: Parsed YAML dictionary.
+
+    Returns:
+        SimpleNamespace with dot-access when all keys are strings, otherwise
+        a plain dict (with recursively converted values).
+    """
+    # If any key is not a valid attribute name, keep this level as a dict.
+    if not all(isinstance(k, str) for k in d.keys()):
+        return {k: _dict_to_namespace(v) if isinstance(v, dict) else v
+                for k, v in d.items()}
+
     ns = SimpleNamespace()
     for key, value in d.items():
         if isinstance(value, dict):

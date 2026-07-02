@@ -18,13 +18,24 @@ import pandas as pd
 import numpy as np
 import json
 from pathlib import Path
-from typing import Optional, dict as Dict
+from typing import Optional, Dict, Tuple
 
 from src.utils.config import cfg
 from src.utils.logger import get_logger
 from src.analysis.ahp import AHP
 
 log = get_logger(__name__)
+
+# ── Sub-index normalization reference constants ─────────────────────────────
+# These convert raw physical measurements to unit-less stress scores [0, 1]
+# before AHP weighting. They are documented here (not in config) because they
+# encode fixed physical/geographic reference bands, mirroring the existing
+# convention in this module (e.g. UHI /6°C, pop_density /50000).
+LST_REF_MIN_C   = 20.0    # °C — comfortable land-surface temperature floor
+LST_REF_MAX_C   = 45.0    # °C — extreme heat-stress ceiling for the region
+UHI_REF_MAX_C   = 6.0     # °C — typical max urban-heat-island intensity (BD)
+POP_DENSITY_MAX = 50000.0 # persons/km² — dense Bangladeshi ward ceiling
+LST_NORM_HINT   = 1.5     # if LST max <= this, values are already in [0, 1]
 
 
 class HHIComputer:
@@ -133,10 +144,18 @@ class HHIComputer:
         lst  = df.get("lst", pd.Series(0.5, index=df.index))
         uhi  = df.get("uhi_intensity", pd.Series(0, index=df.index))
 
-        # LST already normalized 0-1 from preprocessor
-        lst_norm = lst.clip(0, 1)
+        # LST may arrive either already normalized to [0, 1] (from the LSTM
+        # feature matrix) or as raw land-surface temperature in °C (from the
+        # raw HHI panel). Auto-detect and normalize raw °C against the regional
+        # reference band so higher temperature → higher thermal stress.
+        if float(lst.max()) > LST_NORM_HINT:
+            lst_norm = ((lst - LST_REF_MIN_C) /
+                        (LST_REF_MAX_C - LST_REF_MIN_C)).clip(0, 1)
+        else:
+            lst_norm = lst.clip(0, 1)
+
         # UHI: normalize by max observed (6°C typical for Bangladesh industrial zones)
-        uhi_norm = (uhi / 6.0).clip(0, 1)
+        uhi_norm = (uhi / UHI_REF_MAX_C).clip(0, 1)
 
         c3_raw = (w.get("lst",           0.60) * lst_norm +
                   w.get("uhi_intensity", 0.40) * uhi_norm)
@@ -184,7 +203,7 @@ class HHIComputer:
             else {"pop_density": 0.40, "dist_industrial_inv": 0.35, "industrial_fraction": 0.25}
 
         # Normalize population density (max ~50,000/km² for dense BD wards)
-        pop_norm  = (df.get("pop_density", pd.Series(0, index=df.index)) / 50000.0).clip(0, 1)
+        pop_norm  = (df.get("pop_density", pd.Series(0, index=df.index)) / POP_DENSITY_MAX).clip(0, 1)
 
         # Industrial proximity: closer = worse (inverse distance)
         dist = df.get("dist_industrial", pd.Series(10.0, index=df.index))
@@ -250,44 +269,87 @@ class HHIComputer:
         )
         return zones
 
+    # ── RAW SUB-INDICES ─────────────────────────────────────────────────────
+
+    def raw_subindices(self, df: pd.DataFrame) -> Dict[str, pd.Series]:
+        """
+        Compute the five raw (un-normalized) sub-index stress scores.
+
+        Kept separate from `compute` so a caller can pool raw scores across
+        several DataFrames (e.g. historical + BAU/S1/S2 scenarios) and fit a
+        single shared normalization scale via `fit_reference_bounds`.
+
+        Args:
+            df: DataFrame with the required environmental columns.
+
+        Returns:
+            Dict mapping sub-index name to its raw pd.Series.
+        """
+        return {
+            "C1_air":     self.compute_c1_air(df),
+            "C2_water":   self.compute_c2_water(df),
+            "C3_thermal": self.compute_c3_thermal(df),
+            "C4_green":   self.compute_c4_green(df),
+            "C5_socio":   self.compute_c5_socio(df),
+        }
+
+    def fit_reference_bounds(
+        self, df: pd.DataFrame
+    ) -> Dict[str, Tuple[float, float]]:
+        """
+        Fit per-sub-index (min, max) bounds from raw scores, for reuse across
+        multiple DataFrames so their normalized HHI values stay comparable.
+
+        Args:
+            df: Pooled DataFrame (e.g. historical + all scenarios concatenated).
+
+        Returns:
+            Dict mapping sub-index name to (min, max) tuple.
+        """
+        raw = self.raw_subindices(df)
+        bounds = {k: (float(v.min()), float(v.max())) for k, v in raw.items()}
+        log.info(f"Fitted shared HHI reference bounds: "
+                 f"{ {k: (round(a,3), round(b,3)) for k,(a,b) in bounds.items()} }")
+        return bounds
+
     # ── MAIN COMPUTE ────────────────────────────────────────────────────────
 
     def compute(
         self,
         df: pd.DataFrame,
         time_col: str = "date",
-        ward_col: str = "ward_id"
+        ward_col: str = "ward_id",
+        ref_bounds: Optional[Dict[str, Tuple[float, float]]] = None,
     ) -> pd.DataFrame:
         """
         Compute HHI for all rows in df.
 
         Args:
-            df:       DataFrame with all required environmental columns.
-            time_col: Column name for time dimension.
-            ward_col: Column name for spatial unit identifier.
+            df:         DataFrame with all required environmental columns.
+            time_col:   Column name for time dimension.
+            ward_col:   Column name for spatial unit identifier.
+            ref_bounds: Optional shared (min, max) bounds per sub-index from
+                        `fit_reference_bounds`. If None, each sub-index is
+                        min-max normalized using this DataFrame alone.
 
         Returns:
             result: DataFrame with HHI score, sub-indices, and vulnerability zone.
         """
         log.info(f"Computing HHI for {len(df)} records...")
 
-        result = df[[time_col, ward_col]].copy() if (time_col in df.columns
-                                                      and ward_col in df.columns) \
-                 else df.copy()
+        # Preserve identifier columns (and any spatial metadata) when present.
+        id_cols = [c for c in [time_col, "year", ward_col, "district", "upazila",
+                               "lat", "lon", "scenario"] if c in df.columns]
+        result = df[id_cols].copy() if id_cols else pd.DataFrame(index=df.index)
 
         # Compute raw sub-indices
-        c1_raw = self.compute_c1_air(df)
-        c2_raw = self.compute_c2_water(df)
-        c3_raw = self.compute_c3_thermal(df)
-        c4_raw = self.compute_c4_green(df)
-        c5_raw = self.compute_c5_socio(df)
+        raw = self.raw_subindices(df)
+        rb = ref_bounds or {}
 
-        # Normalize each to 0-100
-        result["C1_air"]     = self.normalize_subindex(c1_raw)
-        result["C2_water"]   = self.normalize_subindex(c2_raw)
-        result["C3_thermal"] = self.normalize_subindex(c3_raw)
-        result["C4_green"]   = self.normalize_subindex(c4_raw)
-        result["C5_socio"]   = self.normalize_subindex(c5_raw)
+        # Normalize each to 0-100 (shared bounds if provided, else per-frame)
+        for name, series in raw.items():
+            lo, hi = rb.get(name, (None, None))
+            result[name] = self.normalize_subindex(series, lo, hi)
 
         # Weighted HHI
         result["HHI"] = (
@@ -335,7 +397,7 @@ if __name__ == "__main__":
 
     n = 100
     synthetic = pd.DataFrame({
-        "date":                np.repeat(pd.date_range("2000-01", periods=10, freq="AS"), 10),
+        "date":                np.repeat(pd.date_range("2000-01", periods=10, freq="YS"), 10),
         "ward_id":             np.tile(np.arange(10), 10),
         "pm25":                np.random.uniform(20, 120, n),
         "no2":                 np.random.uniform(10, 90, n),
