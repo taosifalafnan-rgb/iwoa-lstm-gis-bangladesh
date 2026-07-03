@@ -23,6 +23,7 @@ from typing import Optional
 
 from src.utils.config import cfg
 from src.utils.logger import get_logger
+from src.analysis.hhi import annual_ward_hhi
 
 log = get_logger(__name__)
 
@@ -55,7 +56,9 @@ def map_hhi(
         return ""
 
     yr = year or int(hhi_df["year"].max())
-    sub = hhi_df[hhi_df["year"] == yr].copy()
+    # Average the four quarterly observations to one HHI per ward for the year.
+    annual = annual_ward_hhi(hhi_df)
+    sub = annual[annual["year"] == yr].copy()
     bbox = cfg.study_area.bbox
     cmap = cfg.visualization.colormap_hhi        # RdYlGn_r: red = critical
     norm = Normalize(vmin=0, vmax=100)           # fixed HHI scale for comparability

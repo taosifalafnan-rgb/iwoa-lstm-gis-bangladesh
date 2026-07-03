@@ -23,6 +23,7 @@ from typing import Dict, Optional
 
 from src.utils.config import cfg
 from src.utils.logger import get_logger
+from src.analysis.hhi import annual_ward_hhi
 
 log = get_logger(__name__)
 
@@ -122,7 +123,10 @@ def plot_zone_distribution(hist_hhi: pd.DataFrame) -> str:
     Returns:
         Output figure path.
     """
-    counts = (hist_hhi.groupby(["year", "vulnerability_zone"], observed=False)
+    # Collapse quarterly rows to one HHI/zone per ward-year before counting,
+    # so the stacked totals equal the number of wards (not ward-quarters).
+    annual = annual_ward_hhi(hist_hhi)
+    counts = (annual.groupby(["year", "vulnerability_zone"], observed=False)
               .size().unstack(fill_value=0))
     order = ["Acceptable", "Moderate", "At-Risk", "Critical"]
     counts = counts.reindex(columns=[c for c in order if c in counts.columns])
@@ -207,7 +211,9 @@ def plot_ward_ranking(
         Output figure path.
     """
     ty = target_year or int(hhi_df["year"].max())
-    sub = hhi_df[hhi_df["year"] == ty].copy()
+    # One HHI value per ward for the target year (mean of the four quarters).
+    annual = annual_ward_hhi(hhi_df)
+    sub = annual[annual["year"] == ty].copy()
     label_col = "upazila" if "upazila" in sub.columns else "ward_id"
     sub = sub.sort_values("HHI")
 

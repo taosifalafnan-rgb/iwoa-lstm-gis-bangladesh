@@ -14,6 +14,7 @@ Tasks:
 Fitness function: Validation RMSE from proxy mini-LSTM
 """
 
+import math
 import numpy as np
 import json
 import pandas as pd
@@ -61,8 +62,9 @@ def levy_flight(n: int, m: int, lam: float = 1.5) -> np.ndarray:
     Returns:
         steps: Levy flight step array [n, m].
     """
-    num = np.math.gamma(1 + lam) * np.sin(np.pi * lam / 2)
-    den = np.math.gamma((1 + lam) / 2) * lam * (2 ** ((lam - 1) / 2))
+    # NOTE: use math.gamma (np.math was removed in NumPy 2.0).
+    num = math.gamma(1 + lam) * np.sin(np.pi * lam / 2)
+    den = math.gamma((1 + lam) / 2) * lam * (2 ** ((lam - 1) / 2))
     sigma_u = (num / den) ** (1 / lam)
 
     u = np.random.normal(0, sigma_u, size=(n, m))
@@ -144,6 +146,9 @@ class IWOA:
         omega_max:      Optional[float] = None,
         omega_min:      Optional[float] = None,
         obl_enabled:    Optional[bool]  = None,
+        use_inertia:    bool = True,
+        use_levy:       bool = True,
+        nonlinear_a:    bool = True,
     ):
         """
         Args:
@@ -156,6 +161,16 @@ class IWOA:
             omega_max:     Max inertia weight. Defaults to cfg.iwoa.omega_max.
             omega_min:     Min inertia weight. Defaults to cfg.iwoa.omega_min.
             obl_enabled:   Use OBL initialization. Defaults to cfg.iwoa.obl_enabled.
+            use_inertia:   Apply nonlinear inertia-weight blending (Improvement 1).
+                           Set False for the standard-WOA baseline.
+            use_levy:      Apply Levy-flight perturbation (Improvement 3).
+                           Set False for the standard-WOA baseline.
+            nonlinear_a:   Use nonlinear convergence factor a(t) (Improvement 4).
+                           False → the classic linear a(t) = 2 − 2·t/T.
+
+        The three flags are what distinguish IWOA from the baseline WOA: with all
+        of them False (and obl_enabled False), this class reduces exactly to the
+        standard Whale Optimization Algorithm — see `src/optimization/woa.py`.
         """
         set_seed(cfg.seed)
 
@@ -171,6 +186,11 @@ class IWOA:
         self.omega_max   = omega_max   or cfg.iwoa.omega_max
         self.omega_min   = omega_min   or cfg.iwoa.omega_min
         self.obl_enabled = obl_enabled if obl_enabled is not None else cfg.iwoa.obl_enabled
+
+        # Improvement toggles (IWOA = all True; baseline WOA = all False).
+        self.use_inertia = use_inertia
+        self.use_levy    = use_levy
+        self.nonlinear_a = nonlinear_a
 
         # Bounds
         self.lb = np.zeros(self.dim)   # all 0
@@ -241,8 +261,10 @@ class IWOA:
 
     def _adaptive_a(self, t: int) -> float:
         """
-        Adaptive nonlinear convergence factor a(t) (Improvement 4).
-        a(t) = 2 - 2 * (t / T_max)²
+        Convergence factor a(t), decreasing 2 → 0 over the run.
+
+        Improvement 4 (nonlinear):  a(t) = 2 − 2·(t / T_max)²
+        Classic WOA (linear):       a(t) = 2 − 2·(t / T_max)
 
         Args:
             t: Current iteration.
@@ -250,7 +272,10 @@ class IWOA:
         Returns:
             a: Convergence factor at iteration t.
         """
-        return 2 - 2 * (t / self.max_iter) ** 2
+        frac = t / self.max_iter
+        if self.nonlinear_a:
+            return 2 - 2 * frac ** 2
+        return 2 - 2 * frac
 
     def _initialize_population(self) -> np.ndarray:
         """
@@ -345,12 +370,13 @@ class IWOA:
                     new_pos = (D_prime * np.exp(cfg.iwoa.b_constant * l)
                                * np.cos(2 * np.pi * l) + best_pos)
 
-                # Inertia weight (Improvement 1)
-                new_pos = omega * new_pos + (1 - omega) * population[i]
+                # Inertia weight blending (Improvement 1) — IWOA only.
+                if self.use_inertia:
+                    new_pos = omega * new_pos + (1 - omega) * population[i]
 
-                # Levy flight perturbation (Improvement 3)
-                # Apply with 30% probability to escape local optima
-                if np.random.random() < 0.3:
+                # Levy flight perturbation (Improvement 3) — IWOA only.
+                # Apply with 30% probability to escape local optima.
+                if self.use_levy and np.random.random() < 0.3:
                     levy = levy_flight(1, self.dim, self.levy_lambda)[0]
                     new_pos = new_pos + 0.01 * levy * (new_pos - best_pos)
 
@@ -470,7 +496,14 @@ def load_iwoa_result(results_file: Optional[str] = None,
     with open(features_file, "r") as f:
         features = json.load(f)
 
-    result = IWOAResult(**config, **features)
+    # The config JSON already contains selected_features/indices/n_selected
+    # (from asdict). Merge with the features file so the shared keys resolve to
+    # a single value instead of raising "multiple values for keyword argument".
+    merged = {**config, **features}
+    # Drop any keys that are not IWOAResult fields (forward-compatibility).
+    valid = set(IWOAResult.__dataclass_fields__.keys())
+    merged = {k: v for k, v in merged.items() if k in valid}
+    result = IWOAResult(**merged)
     log.info(f"IWOA result loaded: {result.n_selected} features, "
              f"best RMSE={result.best_fitness:.6f}")
     return result

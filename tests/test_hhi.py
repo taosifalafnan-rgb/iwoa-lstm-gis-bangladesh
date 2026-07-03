@@ -11,7 +11,7 @@ import pytest
 
 from src.analysis.hhi import HHIComputer
 from src.analysis.hhi_panel import (
-    build_historical_panel, build_all_scenarios, WARDS,
+    build_historical_panel, build_all_scenarios, WARDS, PERIOD_MONTHS,
 )
 
 # Raw physical columns the HHI computer consumes.
@@ -77,11 +77,18 @@ def test_raw_subindices_keys(hist_panel):
 # ── Panel builder ───────────────────────────────────────────────────────────
 
 def test_panel_schema(hist_panel):
-    """Historical panel must contain all raw columns and one row per ward-year."""
+    """Panel must contain all raw columns and 4 quarterly rows per ward-year."""
     for col in RAW_COLS:
         assert col in hist_panel.columns
     n_years = hist_panel["year"].nunique()
-    assert len(hist_panel) == len(WARDS) * n_years
+    # Quarterly: one row per ward × year × sampling-month.
+    assert len(hist_panel) == len(WARDS) * n_years * len(PERIOD_MONTHS)
+
+
+def test_panel_quarterly_months(hist_panel):
+    """Sampling months must be exactly Jan, Apr, Jul, Oct."""
+    assert sorted(hist_panel["month"].unique()) == PERIOD_MONTHS
+    assert PERIOD_MONTHS == [1, 4, 7, 10]
 
 
 def test_panel_physical_ranges(hist_panel):

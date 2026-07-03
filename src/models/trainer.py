@@ -102,7 +102,11 @@ class Trainer:
         self.train_loader = train_loader
         self.val_loader  = val_loader
         self.max_epochs  = max_epochs  or cfg.training.max_epochs
-        self.lr          = lr          or cfg.lstm.learning_rate
+        # Learning rate priority: explicit arg → config lstm.learning_rate (if
+        # present) → 1e-3 default. The IWOA-tuned LR is normally passed in here
+        # by the training stage (build path in run_pipeline).
+        self.lr          = lr if lr is not None else getattr(
+            cfg.lstm, "learning_rate", 1e-3)
         self.weight_decay = weight_decay or cfg.training.weight_decay
 
         # Loss

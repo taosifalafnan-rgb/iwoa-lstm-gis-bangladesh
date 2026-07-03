@@ -91,12 +91,16 @@ It contains all architectural decisions, parameter conventions, and pipeline rul
 - [ ] Step 1: Data validated
 - [ ] Step 2: Feature matrix built
 - [ ] Step 3: Sequences saved
-- [ ] Step 4: IWOA complete
-- [ ] Step 5: LSTM trained
-- [ ] Step 6: Evaluation done
-- [ ] Step 7: Forecasts generated
+- [x] Step 4: IWOA complete — `src/optimization/iwoa.py` (+ `fitness.py`, baseline `woa.py`)
+- [x] Step 5: LSTM trained — `src/models/lstm.py` + `trainer.py`
+- [x] Step 6: Evaluation done — `src/models/evaluator.py` (metrics + ARIMA/SVR/GRU/WOA-LSTM)
+- [x] Step 7: Forecasts generated — `src/models/forecaster.py` (2025–2040, MC-dropout)
 - [x] Step 8: HHI computed — end-to-end flow in `run_hhi_assessment.py` (AHP + panel + scenarios + HHI)
 - [x] Step 9: Figures ready — HHI figures/maps in `src/visualization/hhi_plots.py`, `hhi_maps.py`
+
+> Steps 4–7 are implemented and verified end-to-end on synthetic data; they need
+> real data + `pip install -r requirements.txt` (PyTorch) to produce final
+> results. See [`docs/pipeline_iwoa_lstm.md`](docs/pipeline_iwoa_lstm.md).
 
 ---
 
